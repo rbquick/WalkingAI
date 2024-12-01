@@ -5,6 +5,21 @@
 //  Created by Brian Quick on 2024-11-24.
 //
 
+/*
+    Setting up for updating in the background
+ <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+ <string>We need your location to provide tracking functionality even when the app is in the background.</string>
+ <key>NSLocationWhenInUseUsageDescription</key>
+ <string>We need your location to provide tracking functionality.</string>
+ <key>NSLocationAlwaysUsageDescription</key>
+ <string>We need your location to provide tracking functionality even when the app is in the background.</string>
+ <key>UIBackgroundModes</key>
+ <array>
+     <string>location</string>
+ </array>
+
+*/
+
 import SwiftUI
 import MapKit
 import CoreLocation
@@ -13,69 +28,90 @@ import CoreMotion
 struct MapView: UIViewRepresentable {
     @Binding var region: MKCoordinateRegion
     var locations: [CLLocation]
-
+    var path: [CLLocationCoordinate2D] // Add a path property
+    
     func makeUIView(context: Context) -> MKMapView {
         let mapView = MKMapView()
         mapView.showsUserLocation = true
         mapView.delegate = context.coordinator
         return mapView
     }
-
+    
     func updateUIView(_ uiView: MKMapView, context: Context) {
         uiView.setRegion(region, animated: true)
         
         // Remove existing annotations
-                uiView.removeAnnotations(uiView.annotations)
-
-                // Add annotations for each location
-                for (index, location) in locations.enumerated() {
-                    let annotation = MKPointAnnotation()
-                    annotation.coordinate = location.coordinate
-                    
-                    let time = DateFormatter.localizedString(from: location.timestamp, dateStyle: .none, timeStyle: .short)
-                    annotation.title = "Time: \(time)"
-                    
-                    if index > 0 {
-                        let distance = locations[index - 1].distance(from: location)
-                        annotation.subtitle = "Distance: \(String(format: "%.2f", distance)) m"
-                    }
-                    
-                    uiView.addAnnotation(annotation)
-                }
+        uiView.removeAnnotations(uiView.annotations)
+        
+        // Add annotations for each location
+        for (index, location) in locations.enumerated() {
+            let annotation = MKPointAnnotation()
+            annotation.coordinate = location.coordinate
+            
+            let time = DateFormatter.localizedString(from: location.timestamp, dateStyle: .none, timeStyle: .short)
+            annotation.title = "Time: \(time)"
+            
+            if index > 0 {
+                let distance = locations[index - 1].distance(from: location)
+                annotation.subtitle = "Distance: \(String(format: "%.2f", distance)) m"
+            }
+            
+            uiView.addAnnotation(annotation)
+        }
+        // Remove existing overlays
+        uiView.removeOverlays(uiView.overlays)
+        
+        // Add polyline for the path
+        if path.count > 1 {
+            let polyline = MKPolyline(coordinates: path, count: path.count)
+            uiView.addOverlay(polyline)
+        }
     }
-
+    
     func makeCoordinator() -> Coordinator {
         return Coordinator(self)
     }
-
+    
     class Coordinator: NSObject, MKMapViewDelegate {
         var parent: MapView
-
+        
         init(_ parent: MapView) {
             self.parent = parent
         }
         
         // Customize annotation view (optional)
-                func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
-                    let identifier = "LocationPin"
-                    var annotationView = mapView.dequeueReusableAnnotationView(withIdentifier: identifier) as? MKPinAnnotationView
-
-                    if annotationView == nil {
-                        annotationView = MKPinAnnotationView(annotation: annotation, reuseIdentifier: identifier)
-                        annotationView?.canShowCallout = true
-                        annotationView?.pinTintColor = .blue
-                    } else {
-                        annotationView?.annotation = annotation
-                    }
-
-                    return annotationView
-                }
+        func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
+            let identifier = "LocationPin"
+            var annotationView = mapView.dequeueReusableAnnotationView(withIdentifier: identifier) as? MKPinAnnotationView
+            
+            if annotationView == nil {
+                annotationView = MKPinAnnotationView(annotation: annotation, reuseIdentifier: identifier)
+                annotationView?.canShowCallout = true
+                annotationView?.pinTintColor = .blue
+            } else {
+                annotationView?.annotation = annotation
+            }
+            
+            return annotationView
+        }
+        
+        func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+            if let polyline = overlay as? MKPolyline {
+                let renderer = MKPolylineRenderer(polyline: polyline)
+                renderer.strokeColor = .blue
+                renderer.lineWidth = 3.0
+                return renderer
+            }
+            return MKOverlayRenderer()
+        }
     }
 }
 
 class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published var region: MKCoordinateRegion
     @Published var locations = [CLLocation]()
+    @Published var path = [CLLocationCoordinate2D]() // Store the path as an array of coordinates
+    
     @Published var metersFromHome: Double = 0
     @Published var totalDistance: Double = 0 // Track total distance traveled
     @Published var stepCount: Int = 0 // Track steps
@@ -102,7 +138,9 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         )
         super.init()
         locationManager.delegate = self
-        locationManager.requestWhenInUseAuthorization()
+        locationManager.requestAlwaysAuthorization() // Request "Always" authorization
+        locationManager.allowsBackgroundLocationUpdates = true // Allow updates in the background
+        locationManager.pausesLocationUpdatesAutomatically = false // Prevent automatic pauses
         locationManager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
         locationManager.requestLocation()
     }
@@ -111,6 +149,9 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         guard let location = locations.last else { return }
         region.center = location.coordinate
         
+        stopTime = Date() // Record the stop time
+        totalTime = stopTime.timeIntervalSince(startTime) // Calculate the total time
+        
         //        print("New location: \(location)")
         
         // calculations to determine if the device is stationary
@@ -118,7 +159,7 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         
         // Add the new location to the buffer
         recentLocations.append((location: location, timestamp: now))
-        print(location)
+        
         // Keep only the last 10 seconds of locations
         recentLocations = recentLocations.filter { now.timeIntervalSince($0.timestamp) <= 10 }
         
@@ -153,6 +194,7 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
                     
                     self.previousLocation = location // Update previous location only if moved
                     self.locations.append(location)
+                    self.path.append(location.coordinate) // Append the new location's coordinate to the path
                     
                 } else {
                     print("Moved: \(String(format: "%.2f", distance)) meters, accuracy: \(String(format: "%.2f", location.horizontalAccuracy)) meters,Traveled: \(String(format: "%.2f", totalDistance)) meters IGNORED")
@@ -160,7 +202,6 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
             }
         } else {
             self.previousLocation = location // Initialize previous location
-            self.locations.removeAll()
             self.locations.append(location)
             self.totalDistance = 0
             self.stepCount = 0
@@ -170,28 +211,28 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         print("Failed to get location: \(error.localizedDescription)")
         // Check the error type to decide how to handle it
-         if let clError = error as? CLError {
-             switch clError.code {
-             case .locationUnknown:
-                 // Retry after a brief delay when the location is temporarily unavailable
-                 DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
-                     self.locationManager.startUpdatingLocation()
-                 }
-             case .denied:
-                 // Handle permission denial
-                 print("Location access denied. Please enable permissions in settings.")
-             case .network:
-                 // Retry when there's a network issue
-                 DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
-                     self.locationManager.startUpdatingLocation()
-                 }
-             default:
-                 print("Unhandled CLError: \(clError.code.rawValue)")
-                     Alert(title: Text("Error"), message: Text("Unhandled CLError: \(clError.code.rawValue)"))
-             }
-         } else {
-             print("Unexpected error: \(error)")
-         }
+        if let clError = error as? CLError {
+            switch clError.code {
+                case .locationUnknown:
+                    // Retry after a brief delay when the location is temporarily unavailable
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                        self.locationManager.startUpdatingLocation()
+                    }
+                case .denied:
+                    // Handle permission denial
+                    print("Location access denied. Please enable permissions in settings.")
+                case .network:
+                    // Retry when there's a network issue
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+                        self.locationManager.startUpdatingLocation()
+                    }
+                default:
+                    print("Unhandled CLError: \(clError.code.rawValue)")
+                    Alert(title: Text("Error"), message: Text("Unhandled CLError: \(clError.code.rawValue)"))
+            }
+        } else {
+            print("Unexpected error: \(error)")
+        }
     }
     
     func toggleTracking() {
@@ -207,6 +248,9 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     private func startTracking() {
         // setting this will clear things on the 1st trip thru the didUpdateLocations
         self.previousLocation = nil
+        self.locations.removeAll()
+        self.path.removeAll()
+        
         startTime = Date() // Record the current time
         totalTime = 0.0 // Reset total time
         
@@ -261,11 +305,15 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
 
 struct ContentView: View {
     @StateObject private var locationManager = LocationManager()
-
+    
     var body: some View {
         ZStack {
-            MapView(region: $locationManager.region, locations: locationManager.locations)
-
+            MapView(
+                region: $locationManager.region,
+                locations: locationManager.locations,
+                path: locationManager.path
+            )
+            
             VStack {
                 Spacer()
                 HStack {
@@ -280,7 +328,7 @@ struct ContentView: View {
                         .background(locationManager.isStationary ? Color.red : Color.blue)
                         .foregroundColor(.white)
                 }
-
+                
                 HStack {
                     Button(locationManager.isTracking ? "Stop Tracking" : "Track Location") {
                         locationManager.toggleTracking()
@@ -292,12 +340,12 @@ struct ContentView: View {
                     .padding()
                     Button("Journal") {
                         sendtoNotes()
-                                        }
-                                        .padding()
-                                        .background(Color.blue)
-                                        .foregroundColor(.white)
-                                        .cornerRadius(8)
-                                        .padding()
+                    }
+                    .padding()
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .cornerRadius(8)
+                    .padding()
                 }
             }
         }
@@ -309,7 +357,7 @@ extension ContentView {
         
         let shortcutName = "SwiftLogNote" // Replace with the exact name of your Shortcut
         let formattedNote = note.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-
+        
         if let url = URL(string: "shortcuts://run-shortcut?name=\(shortcutName)&input=\(formattedNote)") {
             if UIApplication.shared.canOpenURL(url) {
                 UIApplication.shared.open(url) { success in
