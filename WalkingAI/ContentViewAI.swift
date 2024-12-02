@@ -305,13 +305,15 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
 
 struct ContentView: View {
     @StateObject private var locationManager = LocationManager()
+    @State private var showPath = true
+    @State private var showAnnotations = true
     
     var body: some View {
         ZStack {
             MapView(
                 region: $locationManager.region,
-                locations: locationManager.locations,
-                path: locationManager.path
+                locations: showAnnotations ? locationManager.locations : [],
+                path: showPath ? locationManager.path : []
             )
             
             VStack {
@@ -325,8 +327,8 @@ struct ContentView: View {
                     Text("FromHome: \(locationManager.metersFromHome, specifier: "%.2f") m ")
                     Text("Steps: \(locationManager.stepCount)")
                     Text("Total Traveled: \(locationManager.totalDistance, specifier: "%.2f") m ")
-                        .background(locationManager.isStationary ? Color.red : Color.blue)
-                        .foregroundColor(.white)
+                        .background(locationManager.isStationary ? Color.red : Color.clear)
+                        .foregroundColor(locationManager.isStationary ? .white : .primary)
                 }
                 
                 HStack {
@@ -334,18 +336,42 @@ struct ContentView: View {
                         locationManager.toggleTracking()
                     }
                     .padding()
+                    .frame(maxWidth: .infinity)
                     .background(locationManager.isTracking ? Color.red : Color.blue)
                     .foregroundColor(.white)
                     .cornerRadius(8)
-                    .padding()
+//                    .padding()
                     Button("Journal") {
                         sendtoNotes()
                     }
                     .padding()
+                    .frame(maxWidth: .infinity)
                     .background(Color.blue)
                     .foregroundColor(.white)
                     .cornerRadius(8)
+//                    .padding()
+                }
+                // New buttons for toggling path and annotation visibility
+                HStack {
+                    Button(showPath ? "Hide Path" : "Show Path") {
+                        showPath.toggle()
+                    }
                     .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(showPath ? Color.green : Color.gray)
+                    .foregroundColor(.white)
+                    .cornerRadius(8)
+//                    .padding(.horizontal)
+                    
+                    Button(showAnnotations ? "Hide Annotations" : "Show Annotations") {
+                        showAnnotations.toggle()
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(showAnnotations ? Color.green : Color.gray)
+                    .foregroundColor(.white)
+                    .cornerRadius(8)
+//                    .padding(.horizontal)
                 }
             }
         }
