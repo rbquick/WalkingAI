@@ -290,6 +290,11 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         
         print("Stopped tracking")
     }
+    func formatDateToDate(myDate: Date)-> String {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        return dateFormatter.string(from: myDate)
+    }
     func formatDateToTime(myDate: Date)-> String {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "HH:mm:ss"
@@ -318,17 +323,21 @@ struct ContentView: View {
             
             VStack {
                 Spacer()
+                // show the current date in an HStack right justified
+                HStack {
+                    Spacer()
+                    Text("\(locationManager.formatDateToDate(myDate: Date()))")
+                        .padding(.trailing, 25)
+                }
                 HStack {
                     Text("From: \(locationManager.formatDateToTime(myDate: locationManager.startTime))")
                     Text("To: \(locationManager.formatDateToTime(myDate: locationManager.stopTime))")
                     Text("Total: \(locationManager.formatTotalTime())")
                 }
                 HStack {
-                    Text("FromHome: \(locationManager.metersFromHome, specifier: "%.2f") m ")
+                    Text("Home: \(locationManager.metersFromHome, specifier: "%.2f") m ")
                     Text("Steps: \(locationManager.stepCount)")
-                    Text("Total Traveled: \(locationManager.totalDistance, specifier: "%.2f") m ")
-                        .background(locationManager.isStationary ? Color.red : Color.clear)
-                        .foregroundColor(locationManager.isStationary ? .white : .primary)
+                    Text("Total: \(locationManager.totalDistance, specifier: "%.2f")")
                 }
                 
                 HStack {
