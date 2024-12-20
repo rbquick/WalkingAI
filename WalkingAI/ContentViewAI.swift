@@ -82,16 +82,15 @@ struct MapView: UIViewRepresentable {
         // Customize annotation view (optional)
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
             let identifier = "LocationPin"
-            var annotationView = mapView.dequeueReusableAnnotationView(withIdentifier: identifier) as? MKPinAnnotationView
+            var annotationView = mapView.dequeueReusableAnnotationView(withIdentifier: identifier) as? MKMarkerAnnotationView
             
             if annotationView == nil {
-                annotationView = MKPinAnnotationView(annotation: annotation, reuseIdentifier: identifier)
-                annotationView?.canShowCallout = true
-                annotationView?.pinTintColor = .blue
+                annotationView = MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: identifier)
             } else {
                 annotationView?.annotation = annotation
             }
-            
+            annotationView?.canShowCallout = true
+            annotationView?.markerTintColor = .blue
             return annotationView
         }
         
@@ -120,6 +119,8 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     var stopTime: Date = Date()  // Stop time
     @Published var totalTime: TimeInterval = 0.0 // Total time in seconds
     
+    @Published var showAlert: Bool = false
+    @Published var showAlertMessage: String = ""
     
     private var previousLocation: CLLocation? // Keep track of the previous location
     private var recentLocations: [(location: CLLocation, timestamp: Date)] = [] // Buffer of recent locations
@@ -228,7 +229,8 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
                     }
                 default:
                     print("Unhandled CLError: \(clError.code.rawValue)")
-                    Alert(title: Text("Error"), message: Text("Unhandled CLError: \(clError.code.rawValue)"))
+                    showAlertMessage = "Unhandled CLError: \(clError.code.rawValue)"
+                    showAlert = true
             }
         } else {
             print("Unexpected error: \(error)")
@@ -344,6 +346,9 @@ struct ContentView: View {
                     Button(locationManager.isTracking ? "Stop Tracking" : "Track Location") {
                         locationManager.toggleTracking()
                     }
+                    .alert(isPresented: $locationManager.showAlert) {
+                        Alert(title: Text("Error"), message: Text("\(locationManager.showAlertMessage)"))
+                    }
                     .padding()
                     .frame(maxWidth: .infinity)
                     .background(locationManager.isTracking ? Color.red : Color.blue)
@@ -408,8 +413,33 @@ extension ContentView {
         }
     }
 }
+struct MockData {
+    static let locations: [CLLocation] = [
+        CLLocation(latitude: 42.98111634, longitude: -81.05080143), // Starting point
+        CLLocation(latitude: 42.9825, longitude: -81.0490), // Nearby location
+        CLLocation(latitude: 42.9840, longitude: -81.0480)  // Another nearby location
+    ]
+    
+    static let path: [CLLocationCoordinate2D] = [
+        CLLocationCoordinate2D(latitude: 42.98111634, longitude: -81.05080143), // Starting point
+        CLLocationCoordinate2D(latitude: 42.9825, longitude: -81.0490), // First segment
+        CLLocationCoordinate2D(latitude: 42.9840, longitude: -81.0480)  // Second segment
+    ]
+    
+    static let region: MKCoordinateRegion = MKCoordinateRegion(
+        center: CLLocationCoordinate2D(latitude: 42.98111634, longitude: -81.05080143),
+        latitudinalMeters: 1000,
+        longitudinalMeters: 1000
+    )
+}
+class MockLocationManager: ObservableObject {
+    @Published var region = MockData.region
+    @Published var locations = MockData.locations
+    @Published var path = MockData.path
+}
 
 #Preview {
     ContentView()
+        .environmentObject(MockLocationManager())
 }
 
