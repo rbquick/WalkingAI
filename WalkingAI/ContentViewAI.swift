@@ -106,7 +106,7 @@ struct MapView: UIViewRepresentable {
     }
 }
 
-class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
+class LocationManager: NSObject, ObservableObject, @preconcurrency CLLocationManagerDelegate {
     @Published var region: MKCoordinateRegion
     @Published var locations = [CLLocation]()
     @Published var path = [CLLocationCoordinate2D]() // Store the path as an array of coordinates
@@ -209,6 +209,38 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         }
     }
     
+//    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+//        print("Failed to get location: \(error.localizedDescription)")
+//        // Check the error type to decide how to handle it
+//        if let clError = error as? CLError {
+//            switch clError.code {
+//                case .locationUnknown:
+//                    // Retry after a brief delay when the location is temporarily unavailable
+//                    DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+//                        Task { @MainActor in
+//                            self.locationManager.startUpdatingLocation()
+//                        }
+//                    }
+//                case .denied:
+//                    // Handle permission denial
+//                    print("Location access denied. Please enable permissions in settings.")
+//                case .network:
+//                    // Retry when there's a network issue
+//                    DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+//                        Task { @MainActor in
+//                            self.locationManager.startUpdatingLocation()
+//                        }
+//                    }
+//                default:
+//                    print("Unhandled CLError: \(clError.code.rawValue)")
+//                    showAlertMessage = "Unhandled CLError: \(clError.code.rawValue)"
+//                    showAlert = true
+//            }
+//        } else {
+//            print("Unexpected error: \(error)")
+//        }
+//    }
+    @MainActor
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         print("Failed to get location: \(error.localizedDescription)")
         // Check the error type to decide how to handle it
@@ -216,7 +248,8 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
             switch clError.code {
                 case .locationUnknown:
                     // Retry after a brief delay when the location is temporarily unavailable
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                    Task {
+                        try await Task.sleep(nanoseconds: 5 * 1_000_000_000)
                         self.locationManager.startUpdatingLocation()
                     }
                 case .denied:
@@ -224,7 +257,8 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
                     print("Location access denied. Please enable permissions in settings.")
                 case .network:
                     // Retry when there's a network issue
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+                    Task {
+                        try await Task.sleep(nanoseconds: 10 * 1_000_000_000)
                         self.locationManager.startUpdatingLocation()
                     }
                 default:
@@ -236,8 +270,8 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
             print("Unexpected error: \(error)")
         }
     }
-    
-    func toggleTracking() {
+
+    @MainActor func toggleTracking() {
         isTracking.toggle()
         
         if isTracking {
@@ -247,8 +281,38 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         }
     }
     
+//    private func startTracking() {
+//        // setting this will clear things on the 1st trip thru the didUpdateLocations
+//        self.previousLocation = nil
+//        self.locations.removeAll()
+//        self.path.removeAll()
+//        
+//        startTime = Date() // Record the current time
+//        totalTime = 0.0 // Reset total time
+//        
+//        locationManager.startUpdatingLocation()
+//        
+//        // Start pedometer updates
+//        
+//        if CMPedometer.isStepCountingAvailable() {
+//            pedometer.startUpdates(from: Date()) { [weak self] data, error in
+//                if let error = error {
+//                    print("Pedometer error:      \(error.localizedDescription)")
+//                    return
+//                }
+//                
+//                DispatchQueue.main.async {
+//                    self?.stepCount = data?.numberOfSteps.intValue ?? 0
+//                    //                            print("stepCount: \(String(describing: self?.stepCount))")
+//                }
+//            }
+//        }
+//
+//        print("Started tracking")
+//    }
+    @MainActor
     private func startTracking() {
-        // setting this will clear things on the 1st trip thru the didUpdateLocations
+        // Setting this will clear things on the 1st trip through didUpdateLocations
         self.previousLocation = nil
         self.locations.removeAll()
         self.path.removeAll()
@@ -259,29 +323,24 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         locationManager.startUpdatingLocation()
         
         // Start pedometer updates
-        
         if CMPedometer.isStepCountingAvailable() {
             pedometer.startUpdates(from: Date()) { [weak self] data, error in
                 if let error = error {
-                    print("Pedometer error:      \(error.localizedDescription)")
+                    print("Pedometer error: \(error.localizedDescription)")
                     return
                 }
                 
-                DispatchQueue.main.async {
+                Task { @MainActor in
                     self?.stepCount = data?.numberOfSteps.intValue ?? 0
-                    //                            print("stepCount: \(String(describing: self?.stepCount))")
+                    // Uncomment this for debugging purposes
+                    // print("stepCount: \(String(describing: self?.stepCount))")
                 }
             }
         }
         
-        // Set up a timer to request location updates every 10 seconds
-        //        trackingTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-        //            self?.locationManager.requestLocation()
-        //        }
-        
         print("Started tracking")
     }
-    
+
     private func stopTracking() {
         locationManager.stopUpdatingLocation()
         pedometer.stopUpdates()
