@@ -24,7 +24,9 @@ import SwiftUI
 import MapKit
 import CoreLocation
 import CoreMotion
+import UIKit
 
+@MainActor
 struct MapView: UIViewRepresentable {
     @Binding var region: MKCoordinateRegion
     var locations: [CLLocation]
@@ -38,33 +40,36 @@ struct MapView: UIViewRepresentable {
     }
     
     func updateUIView(_ uiView: MKMapView, context: Context) {
-        uiView.setRegion(region, animated: true)
-        
-        // Remove existing annotations
-        uiView.removeAnnotations(uiView.annotations)
-        
-        // Add annotations for each location
-        for (index, location) in locations.enumerated() {
-            let annotation = MKPointAnnotation()
-            annotation.coordinate = location.coordinate
+        Task { @MainActor in
+            uiView.setRegion(region, animated: true)
             
-            let time = DateFormatter.localizedString(from: location.timestamp, dateStyle: .none, timeStyle: .short)
-            annotation.title = "Time: \(time)"
+            // Remove existing annotations
+            uiView.removeAnnotations(uiView.annotations)
             
-            if index > 0 {
-                let distance = locations[index - 1].distance(from: location)
-                annotation.subtitle = "Distance: \(String(format: "%.2f", distance)) m"
+            // Add annotations for each location
+            for (index, location) in locations.enumerated() {
+                let annotation = MKPointAnnotation()
+                annotation.coordinate = location.coordinate
+                
+                let time = DateFormatter.localizedString(from: location.timestamp, dateStyle: .none, timeStyle: .short)
+                annotation.title = "Time: \(time)"
+                
+                if index > 0 {
+                    let distance = locations[index - 1].distance(from: location)
+                    annotation.subtitle = "Distance: \(String(format: "%.2f", distance)) m"
+                }
+                
+                uiView.addAnnotation(annotation)
+            }
+            // Remove existing overlays
+            uiView.removeOverlays(uiView.overlays)
+            
+            // Add polyline for the path
+            if path.count > 1 {
+                let polyline = MKPolyline(coordinates: path, count: path.count)
+                uiView.addOverlay(polyline)
             }
             
-            uiView.addAnnotation(annotation)
-        }
-        // Remove existing overlays
-        uiView.removeOverlays(uiView.overlays)
-        
-        // Add polyline for the path
-        if path.count > 1 {
-            let polyline = MKPolyline(coordinates: path, count: path.count)
-            uiView.addOverlay(polyline)
         }
     }
     
@@ -105,7 +110,11 @@ struct MapView: UIViewRepresentable {
         }
     }
 }
-
+@MainActor
+class MapViewController: ObservableObject {
+    var mapView = MKMapView()
+}
+@MainActor
 class LocationManager: NSObject, ObservableObject, @preconcurrency CLLocationManagerDelegate {
     @Published var region: MKCoordinateRegion
     @Published var locations = [CLLocation]()
@@ -183,29 +192,38 @@ class LocationManager: NSObject, ObservableObject, @preconcurrency CLLocationMan
         
         // Ensure the location is accurate and significant movement has occurred
         if let previousLocation = previousLocation {
+            print("1.previousLocation = previousLocation ")
             let distance = previousLocation.distance(from: location)
             // Distance between first and the current location
             self.metersFromHome = self.locations[0].distance(from: location)
+            print("2.previousLocation = previousLocation ")
             // Check if the distance exceeds the threshold and if the accuracy is acceptable
             if !self.isStationary {
                 
                 if distance > 5.0 && location.horizontalAccuracy < 20.0 {
-                    totalDistance += distance
-                    print("Moved: \(String(format: "%.2f", distance)) meters, accuracy: \(String(format: "%.2f", location.horizontalAccuracy)) meters,Traveled: \(String(format: "%.2f", totalDistance)) meters")
-                    
-                    self.previousLocation = location // Update previous location only if moved
-                    self.locations.append(location)
-                    self.path.append(location.coordinate) // Append the new location's coordinate to the path
+                   // DispatchQueue.main.async {
+                        print("1.Moved: \(String(format: "%.2f", distance)) meters, accuracy: \(String(format: "%.2f", location.horizontalAccuracy)) meters,Traveled: \(String(format: "%.2f", self.totalDistance)) meters")
+                        
+                    self.totalDistance += distance
+                        self.previousLocation = location // Update previous location only if moved
+                        self.locations.append(location)
+                        self.path.append(location.coordinate) // Append the new location's coordinate to the path
+                    print("1.Moved after")
+                   // }
                     
                 } else {
-                    print("Moved: \(String(format: "%.2f", distance)) meters, accuracy: \(String(format: "%.2f", location.horizontalAccuracy)) meters,Traveled: \(String(format: "%.2f", totalDistance)) meters IGNORED")
+                    print("2.Moved")
+//                    print("2.Moved: \(String(format: "%.2f", distance)) meters, accuracy: \(String(format: "%.2f", location.horizontalAccuracy)) meters,Traveled: \(String(format: "%.2f", totalDistance)) meters IGNORED")
                 }
             }
         } else {
-            self.previousLocation = location // Initialize previous location
-            self.locations.append(location)
-            self.totalDistance = 0
-            self.stepCount = 0
+//            DispatchQueue.main.async {
+            print("Moved else")
+                self.previousLocation = location // Initialize previous location
+                self.locations.append(location)
+                self.totalDistance = 0
+                self.stepCount = 0
+//            }  // end DispatchQueue.main.async
         }
     }
     
@@ -240,7 +258,7 @@ class LocationManager: NSObject, ObservableObject, @preconcurrency CLLocationMan
 //            print("Unexpected error: \(error)")
 //        }
 //    }
-    @MainActor
+    
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         print("Failed to get location: \(error.localizedDescription)")
         // Check the error type to decide how to handle it
@@ -271,7 +289,8 @@ class LocationManager: NSObject, ObservableObject, @preconcurrency CLLocationMan
         }
     }
 
-    @MainActor func toggleTracking() {
+    
+    func toggleTracking() {
         isTracking.toggle()
         
         if isTracking {
@@ -310,8 +329,8 @@ class LocationManager: NSObject, ObservableObject, @preconcurrency CLLocationMan
 //
 //        print("Started tracking")
 //    }
-    @MainActor
     private func startTracking() {
+        print("Started tracking Enter")
         // Setting this will clear things on the 1st trip through didUpdateLocations
         self.previousLocation = nil
         self.locations.removeAll()
@@ -324,26 +343,30 @@ class LocationManager: NSObject, ObservableObject, @preconcurrency CLLocationMan
         
         // Start pedometer updates
         if CMPedometer.isStepCountingAvailable() {
-            pedometer.startUpdates(from: Date()) { [weak self] data, error in
+            Task { @MainActor in
+                
+                self.pedometer.startUpdates(from: Date()) { data, error in
                 if let error = error {
-                    print("Pedometer error: \(error.localizedDescription)")
+//                    print("Pedometer error: \(error.localizedDescription)")
+                    print("Starttracking Error")
                     return
                 }
-                
-                Task { @MainActor in
-                    self?.stepCount = data?.numberOfSteps.intValue ?? 0
+                   // self.stepCount = data!.numberOfSteps.intValue
                     // Uncomment this for debugging purposes
                     // print("stepCount: \(String(describing: self?.stepCount))")
-                }
+                
             }
+            }  // end Task
         }
         
-        print("Started tracking")
+        print("Started tracking Exit")
     }
-
+    
     private func stopTracking() {
         locationManager.stopUpdatingLocation()
-        pedometer.stopUpdates()
+//        DispatchQueue.main.async {
+            self.pedometer.stopUpdates()
+//        }
         trackingTimer?.invalidate()
         trackingTimer = nil
         stopTime = Date() // Record the stop time
@@ -365,7 +388,17 @@ class LocationManager: NSObject, ObservableObject, @preconcurrency CLLocationMan
         let hours = Int(totalTime) / 3600
         let minutes = (Int(totalTime) % 3600) / 60
         let seconds = Int(totalTime) % 60
-        return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
+        if hours > 0 {
+                return String(format: "%d:%02d:%02d", hours, minutes, seconds) // Show full HH:MM:SS format
+            } else if minutes > 0 {
+                return String(format: "%d:%02d", minutes, seconds) // Show MM:SS format if no hours
+            } else {
+                return String(format: "%d", seconds) // Show only seconds if no hours or minutes
+            }
+    }
+    func formatTotalTimeToMinutes() -> String {
+        let minutes = Int(totalTime) / 60
+        return String(format: "%d min", minutes)
     }
 }
 
@@ -373,15 +406,16 @@ struct ContentView: View {
     @StateObject private var locationManager = LocationManager()
     @State private var showPath = true
     @State private var showAnnotations = true
-    
+    @StateObject private var controller = MapViewController()
+    @State private var capturedImage: UIImage?
+    @State private var showCapturedImageSheet = false
     var body: some View {
         ZStack {
-            MapView(
-                region: $locationManager.region,
-                locations: showAnnotations ? locationManager.locations : [],
-                path: showPath ? locationManager.path : []
-            )
-            
+                MapView(
+                    region: $locationManager.region,
+                    locations: showAnnotations ? locationManager.locations : [],
+                    path: showPath ? locationManager.path : []
+                )
             VStack {
                 Spacer()
                 // show the current date in an HStack right justified
@@ -390,6 +424,7 @@ struct ContentView: View {
                     Text("\(locationManager.formatDateToDate(myDate: Date()))")
                         .padding(.trailing, 25)
                 }
+                /* code to display status removed trying to debug
                 HStack {
                     Text("From: \(locationManager.formatDateToTime(myDate: locationManager.startTime))")
                     Text("To: \(locationManager.formatDateToTime(myDate: locationManager.stopTime))")
@@ -400,7 +435,8 @@ struct ContentView: View {
                     Text("Steps: \(locationManager.stepCount)")
                     Text("Total: \(locationManager.totalDistance, specifier: "%.2f")")
                 }
-                
+                code to display status removed trying to debug
+                 */
                 HStack {
                     Button(locationManager.isTracking ? "Stop Tracking" : "Track Location") {
                         locationManager.toggleTracking()
@@ -413,7 +449,7 @@ struct ContentView: View {
                     .background(locationManager.isTracking ? Color.red : Color.blue)
                     .foregroundColor(.white)
                     .cornerRadius(8)
-//                    .padding()
+                    //                    .padding()
                     Button("Journal") {
                         sendtoNotes()
                     }
@@ -422,7 +458,7 @@ struct ContentView: View {
                     .background(Color.blue)
                     .foregroundColor(.white)
                     .cornerRadius(8)
-//                    .padding()
+                    //                    .padding()
                 }
                 // New buttons for toggling path and annotation visibility
                 HStack {
@@ -434,7 +470,7 @@ struct ContentView: View {
                     .background(showPath ? Color.green : Color.gray)
                     .foregroundColor(.white)
                     .cornerRadius(8)
-//                    .padding(.horizontal)
+                    //                    .padding(.horizontal)
                     
                     Button(showAnnotations ? "Hide Annotations" : "Show Annotations") {
                         showAnnotations.toggle()
@@ -444,15 +480,71 @@ struct ContentView: View {
                     .background(showAnnotations ? Color.green : Color.gray)
                     .foregroundColor(.white)
                     .cornerRadius(8)
-//                    .padding(.horizontal)
+                    //                    .padding(.horizontal)
+                    Button("Capture Screenshot") {
+                        captureMapSnapshot()
+//                        captureMapSnapshot()
+                    }
+                    .padding()
+                    
+                    
+                }
+                .sheet(isPresented: $showCapturedImageSheet) {
+                    if let image = capturedImage {
+                        VStack {
+                            Text("Captured Image")
+                                .font(.headline)
+                                .padding()
+
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFit()
+                                .padding()
+                            
+                            Button("Dismiss") {
+                                showCapturedImageSheet = false
+                            }
+                            .padding()
+                        }
+                    } else {
+                        Text("No image available")
+                    }
                 }
             }
         }
     }
 }
 extension ContentView {
+    // from chatgpt
+    func captureMapSnapshot() {
+        let region = locationManager.region
+        // Make sure region is valid before proceeding
+        guard region.span.latitudeDelta > 0, region.span.longitudeDelta > 0 else {
+            print("Region not ready yet.")
+            return
+        }
+
+        let options = MKMapSnapshotter.Options()
+        options.region = region
+        options.size = CGSize(width: 300, height: 300)
+
+        let snapshotter = MKMapSnapshotter(options: options)
+        snapshotter.start { snapshot, error in
+            guard let snapshot = snapshot else {
+                print("Snapshot error: \(String(describing: error))")
+                return
+            }
+
+            let image = snapshot.image
+            DispatchQueue.main.async {
+                self.capturedImage = image
+                self.showCapturedImageSheet = true
+            }
+        }
+    }
+
     func sendtoNotes() {
-        let note = "Walking for \(locationManager.formatTotalTime()), \(String(format: "%.2f", locationManager.totalDistance)) meters, and \(locationManager.stepCount) steps"
+        let note = "Walking for \(locationManager.formatTotalTimeToMinutes()) Minutes, \(String(format: "%.2f", locationManager.totalDistance)) meters, and \(locationManager.stepCount) steps"
         
         let shortcutName = "SwiftLogNote" // Replace with the exact name of your Shortcut
         let formattedNote = note.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
@@ -487,8 +579,8 @@ struct MockData {
     
     static let region: MKCoordinateRegion = MKCoordinateRegion(
         center: CLLocationCoordinate2D(latitude: 42.98111634, longitude: -81.05080143),
-        latitudinalMeters: 1000,
-        longitudinalMeters: 1000
+        latitudinalMeters: 100,
+        longitudinalMeters: 100
     )
 }
 class MockLocationManager: ObservableObject {
