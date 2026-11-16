@@ -11,6 +11,7 @@ import SwiftUI
 struct WalkingAIApp: App {
     var body: some Scene {
         WindowGroup {
+//            testing()
             ContentView()
         }
     }

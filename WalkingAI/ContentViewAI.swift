@@ -199,7 +199,7 @@ class LocationManager: NSObject, ObservableObject, @preconcurrency CLLocationMan
             print("2.previousLocation = previousLocation ")
             // Check if the distance exceeds the threshold and if the accuracy is acceptable
             if !self.isStationary {
-                
+                print("!self.isStationary ...")
                 if distance > 5.0 && location.horizontalAccuracy < 20.0 {
                    // DispatchQueue.main.async {
                         print("1.Moved: \(String(format: "%.2f", distance)) meters, accuracy: \(String(format: "%.2f", location.horizontalAccuracy)) meters,Traveled: \(String(format: "%.2f", self.totalDistance)) meters")
@@ -266,19 +266,41 @@ class LocationManager: NSObject, ObservableObject, @preconcurrency CLLocationMan
             switch clError.code {
                 case .locationUnknown:
                     // Retry after a brief delay when the location is temporarily unavailable
+//                    Task {
+//                        try await Task.sleep(nanoseconds: 5 * 1_000_000_000)
+//                        self.locationManager.startUpdatingLocation()
+//                    }
                     Task {
-                        try await Task.sleep(nanoseconds: 5 * 1_000_000_000)
-                        self.locationManager.startUpdatingLocation()
+                        do {
+                            try await Task.sleep(nanoseconds: 5 * 1_000_000_000)
+                            self.locationManager.startUpdatingLocation()
+                        } catch {
+                            // If the sleep is cancelled or throws, log and exit gracefully.
+#if DEBUG
+                            print("Retry Task cancelled or failed: \(error)")
+#endif
+                        }
                     }
                 case .denied:
                     // Handle permission denial
                     print("Location access denied. Please enable permissions in settings.")
                 case .network:
                     // Retry when there's a network issue
+//                    Task {
+//                        try await Task.sleep(nanoseconds: 10 * 1_000_000_000)
+//                        self.locationManager.startUpdatingLocation()
+//                    }
                     Task {
-                        try await Task.sleep(nanoseconds: 10 * 1_000_000_000)
-                        self.locationManager.startUpdatingLocation()
-                    }
+                          do {
+                              try await Task.sleep(nanoseconds: 5 * 1_000_000_000)
+                              self.locationManager.startUpdatingLocation()
+                          } catch {
+                              // If the sleep is cancelled or throws, log and exit gracefully.
+                              #if DEBUG
+                              print("Retry Task cancelled or failed: \(error)")
+                              #endif
+                          }
+                      }
                 default:
                     print("Unhandled CLError: \(clError.code.rawValue)")
                     showAlertMessage = "Unhandled CLError: \(clError.code.rawValue)"
@@ -329,6 +351,7 @@ class LocationManager: NSObject, ObservableObject, @preconcurrency CLLocationMan
 //
 //        print("Started tracking")
 //    }
+    @MainActor
     private func startTracking() {
         print("Started tracking Enter")
         // Setting this will clear things on the 1st trip through didUpdateLocations
@@ -341,7 +364,11 @@ class LocationManager: NSObject, ObservableObject, @preconcurrency CLLocationMan
         
         locationManager.startUpdatingLocation()
         
+// FIXME: implement this code if you want to count steps... check the Task, i do not think it is required
+        
         // Start pedometer updates
+        // 2026-11-16 15:42 removed the pedometer counting steps since i am not counting
+        /*
         if CMPedometer.isStepCountingAvailable() {
             Task { @MainActor in
                 
@@ -358,6 +385,7 @@ class LocationManager: NSObject, ObservableObject, @preconcurrency CLLocationMan
             }
             }  // end Task
         }
+        */
         
         print("Started tracking Exit")
     }
@@ -486,8 +514,10 @@ struct ContentView: View {
 //                        captureMapSnapshot()
                     }
                     .padding()
-                    
-                    
+                    Button("Capture Screen") {
+                        captureScreenSnapshot()
+                    }
+                    .padding()
                 }
                 .sheet(isPresented: $showCapturedImageSheet) {
                     if let image = capturedImage {
@@ -540,6 +570,29 @@ extension ContentView {
                 self.capturedImage = image
                 self.showCapturedImageSheet = true
             }
+        }
+    }
+    func captureScreenSnapshot() {
+        // Attempt to capture the key window or first connected scene's window
+        guard let windowScene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first,
+              let window = windowScene.keyWindow ?? windowScene.windows.first else {
+            print("No window available to capture.")
+            return
+        }
+
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = UIScreen.main.scale
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(bounds: window.bounds, format: format)
+        let image = renderer.image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+
+        DispatchQueue.main.async {
+            self.capturedImage = image
+            self.showCapturedImageSheet = true
         }
     }
 
