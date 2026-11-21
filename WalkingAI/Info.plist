@@ -6,6 +6,8 @@
 	<array>
 		<string></string>
 	</array>
+	<key>NSMotionUsageDescription</key>
+	<string>WalkingAI uses motion activity to count your steps.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string></string>

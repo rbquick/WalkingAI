@@ -123,6 +123,7 @@ class LocationManager: NSObject, ObservableObject, @preconcurrency CLLocationMan
     @Published var metersFromHome: Double = 0
     @Published var totalDistance: Double = 0 // Track total distance traveled
     @Published var stepCount: Int = 0 // Track steps
+    var errorMessage = ""
     @Published var isStationary: Bool = false // New property to indicate stationary state
     var startTime: Date = Date() // Start time
     var stopTime: Date = Date()  // Stop time
@@ -317,11 +318,43 @@ class LocationManager: NSObject, ObservableObject, @preconcurrency CLLocationMan
         
         if isTracking {
             startTracking()
+            startPedometer()
         } else {
             stopTracking()
         }
     }
-    
+    private func startPedometer() {
+            guard CMPedometer.isStepCountingAvailable() else {
+                errorMessage = "Step counting not available"
+                return
+            }
+
+            let startOfDay = Calendar.current.startOfDay(for: Date())
+            
+            pedometer.startUpdates(
+                from: startOfDay,
+                withHandler: handlePedometerUpdate(data:error:)
+            )
+        }
+
+    /// Core Motion calls this handler on its own background serial queue.
+    nonisolated private func handlePedometerUpdate(
+        data: CMPedometerData?,
+        error: (any Error)?
+    ) {
+        let errorMessage = error?.localizedDescription
+        let stepCount = data?.numberOfSteps.intValue
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            if let errorMessage {
+                self.errorMessage = errorMessage
+            } else if let stepCount {
+                self.stepCount = stepCount
+            }
+        }
+    }
 //    private func startTracking() {
 //        // setting this will clear things on the 1st trip thru the didUpdateLocations
 //        self.previousLocation = nil
@@ -386,7 +419,7 @@ class LocationManager: NSObject, ObservableObject, @preconcurrency CLLocationMan
             }  // end Task
         }
         */
-        
+
         print("Started tracking Exit")
     }
     
@@ -553,19 +586,22 @@ extension ContentView {
             print("Region not ready yet.")
             return
         }
-
+        
         let options = MKMapSnapshotter.Options()
         options.region = region
         options.size = CGSize(width: 300, height: 300)
-
+        
         let snapshotter = MKMapSnapshotter(options: options)
         snapshotter.start { snapshot, error in
             guard let snapshot = snapshot else {
                 print("Snapshot error: \(String(describing: error))")
                 return
             }
-
+            
             let image = snapshot.image
+            // Copy to clipboard
+            UIPasteboard.general.image = image
+            print("Snapshot image copied to clipboard.")
             DispatchQueue.main.async {
                 self.capturedImage = image
                 self.showCapturedImageSheet = true
@@ -581,7 +617,7 @@ extension ContentView {
             print("No window available to capture.")
             return
         }
-
+        
         let format = UIGraphicsImageRendererFormat()
         format.scale = UIScreen.main.scale
         format.opaque = true
@@ -589,31 +625,56 @@ extension ContentView {
         let image = renderer.image { _ in
             window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
         }
-
+        // Copy to clipboard
+        UIPasteboard.general.image = image
+        print("Screen image copied to clipboard.")
+        
         DispatchQueue.main.async {
             self.capturedImage = image
             self.showCapturedImageSheet = true
         }
     }
-
+    
+    
+//    func sendtoNotes() {
+//        let note = "Walking for \(locationManager.formatTotalTimeToMinutes()) Minutes, \(String(format: "%.2f", locationManager.totalDistance)) meters, and \(locationManager.stepCount) steps"
+//        
+//        let shortcutName = "SwiftLogNote" // Replace with the exact name of your Shortcut
+//        let formattedNote = note.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+//        
+//        if let url = URL(string: "shortcuts://run-shortcut?name=\(shortcutName)&input=\(formattedNote)") {
+//            if UIApplication.shared.canOpenURL(url) {
+//                UIApplication.shared.open(url) { success in
+//                    if success {
+//                        print("Shortcut successfully called with note: \(note)")
+//                    } else {
+//                        print("Failed to call Shortcut.")
+//                    }
+//                }
+//            } else {
+//                print("Cannot open URL: shortcuts://run-shortcut")
+//            }
+//        }
+//    }
     func sendtoNotes() {
         let note = "Walking for \(locationManager.formatTotalTimeToMinutes()) Minutes, \(String(format: "%.2f", locationManager.totalDistance)) meters, and \(locationManager.stepCount) steps"
-        
-        let shortcutName = "SwiftLogNote" // Replace with the exact name of your Shortcut
-        let formattedNote = note.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        
-        if let url = URL(string: "shortcuts://run-shortcut?name=\(shortcutName)&input=\(formattedNote)") {
-            if UIApplication.shared.canOpenURL(url) {
-                UIApplication.shared.open(url) { success in
-                    if success {
-                        print("Shortcut successfully called with note: \(note)")
-                    } else {
-                        print("Failed to call Shortcut.")
-                    }
-                }
-            } else {
-                print("Cannot open URL: shortcuts://run-shortcut")
-            }
+
+        var components = URLComponents()
+        components.scheme = "shortcuts"
+        components.host = "x-callback-url"
+        components.path = "/run-shortcut"
+        components.queryItems = [
+            URLQueryItem(name: "name", value: "SwiftLogNote"),
+            URLQueryItem(name: "input", value: "text"),
+            URLQueryItem(name: "text", value: note),
+            URLQueryItem(name: "x-success", value: "handibyhole://shortcut-done"),
+            URLQueryItem(name: "x-cancel", value: "handibyhole://shortcut-done"),
+            URLQueryItem(name: "x-error", value: "handibyhole://shortcut-done")
+        ]
+
+        guard let url = components.url else { return }
+        UIApplication.shared.open(url) { success in
+            print(success ? "Shortcut called" : "Failed to call Shortcut")
         }
     }
 }
@@ -646,4 +707,3 @@ class MockLocationManager: ObservableObject {
     ContentView()
         .environmentObject(MockLocationManager())
 }
-
